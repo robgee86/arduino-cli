@@ -170,35 +170,35 @@ func (s *arduinoCoreServerImpl) Compile(req *rpc.CompileRequest, stream rpc.Ardu
 		}
 	}
 
-	// If no build path has been set by the user:
-	// - set up the build cache directory
-	// - set the sketch build path inside the build cache directory.
-	var coreBuildCachePath *paths.Path
+	// The build cache holds the compiled cores, whatever the build path: a sketch built in
+	// a path of its own reuses the core of its board as any other.
+	var buildCachePath *paths.Path
+	if p := req.GetBuildCachePath(); p != "" { //nolint:staticcheck
+		buildCachePath = paths.New(p)
+	} else {
+		buildCachePath = s.settings.GetBuildCachePath()
+	}
+	if err := buildCachePath.ToAbs(); err != nil {
+		return &cmderrors.PermissionDeniedError{Message: i18n.Tr("Cannot create build cache directory"), Cause: err}
+	}
+	if err := buildCachePath.MkdirAll(); err != nil {
+		return &cmderrors.PermissionDeniedError{Message: i18n.Tr("Cannot create build cache directory"), Cause: err}
+	}
+	coreBuildCachePath := buildCachePath.Join("cores")
+
 	var extraCoreBuildCachePaths paths.PathList
+	if len(req.GetBuildCacheExtraPaths()) == 0 {
+		extraCoreBuildCachePaths = s.settings.GetBuildCacheExtraPaths()
+	} else {
+		extraCoreBuildCachePaths = paths.NewPathList(req.GetBuildCacheExtraPaths()...)
+	}
+	for i, p := range extraCoreBuildCachePaths {
+		extraCoreBuildCachePaths[i] = p.Join("cores")
+	}
+
+	// If no build path has been set by the user the sketch builds inside the build cache
+	// directory, which is purged after the compilation.
 	if buildPath == nil {
-		var buildCachePath *paths.Path
-		if p := req.GetBuildCachePath(); p != "" { //nolint:staticcheck
-			buildCachePath = paths.New(p)
-		} else {
-			buildCachePath = s.settings.GetBuildCachePath()
-		}
-		if err := buildCachePath.ToAbs(); err != nil {
-			return &cmderrors.PermissionDeniedError{Message: i18n.Tr("Cannot create build cache directory"), Cause: err}
-		}
-		if err := buildCachePath.MkdirAll(); err != nil {
-			return &cmderrors.PermissionDeniedError{Message: i18n.Tr("Cannot create build cache directory"), Cause: err}
-		}
-		coreBuildCachePath = buildCachePath.Join("cores")
-
-		if len(req.GetBuildCacheExtraPaths()) == 0 {
-			extraCoreBuildCachePaths = s.settings.GetBuildCacheExtraPaths()
-		} else {
-			extraCoreBuildCachePaths = paths.NewPathList(req.GetBuildCacheExtraPaths()...)
-		}
-		for i, p := range extraCoreBuildCachePaths {
-			extraCoreBuildCachePaths[i] = p.Join("cores")
-		}
-
 		buildPath = s.getDefaultSketchBuildPath(sk, buildCachePath)
 		buildcache.New(buildPath.Parent()).GetOrCreate(buildPath.Base())
 
